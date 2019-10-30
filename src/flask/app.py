@@ -8,6 +8,7 @@
     :copyright: 2010 Pallets
     :license: BSD-3-Clause
 """
+import asyncio
 import os
 import sys
 import warnings
@@ -53,6 +54,7 @@ from .helpers import get_env
 from .helpers import get_flashed_messages
 from .helpers import get_load_dotenv
 from .helpers import locked_cached_property
+from .helpers import run_async
 from .helpers import url_for
 from .json import jsonify
 from .logging import create_logger
@@ -1281,7 +1283,7 @@ class Flask(_PackageBoundObject):
                     "View function mapping is overwriting an "
                     "existing endpoint function: %s" % endpoint
                 )
-            self.view_functions[endpoint] = view_func
+            self.view_functions[endpoint] = self.ensure_sync(view_func)
 
     def route(self, rule, **options):
         """A decorator that is used to register a view function for a
@@ -1328,7 +1330,7 @@ class Flask(_PackageBoundObject):
         """
 
         def decorator(f):
-            self.view_functions[endpoint] = f
+            self.view_functions[endpoint] = self.ensure_sync(f)
             return f
 
         return decorator
@@ -1424,7 +1426,7 @@ class Flask(_PackageBoundObject):
             )
 
         handlers = self.error_handler_spec.setdefault(key, {}).setdefault(code, {})
-        handlers[exc_class] = f
+        handlers[exc_class] = self.ensure_sync(f)
 
     @setupmethod
     def template_filter(self, name=None):
@@ -1540,7 +1542,7 @@ class Flask(_PackageBoundObject):
         non-None value, the value is handled as if it was the return value from
         the view, and further request handling is stopped.
         """
-        self.before_request_funcs.setdefault(None, []).append(f)
+        self.before_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -1553,7 +1555,7 @@ class Flask(_PackageBoundObject):
 
         .. versionadded:: 0.8
         """
-        self.before_first_request_funcs.append(f)
+        self.before_first_request_funcs.append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -1567,7 +1569,7 @@ class Flask(_PackageBoundObject):
         As of Flask 0.7 this function might not be executed at the end of the
         request in case an unhandled exception occurred.
         """
-        self.after_request_funcs.setdefault(None, []).append(f)
+        self.after_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -1606,7 +1608,7 @@ class Flask(_PackageBoundObject):
            debugger can still access it.  This behavior can be controlled
            by the ``PRESERVE_CONTEXT_ON_EXCEPTION`` configuration variable.
         """
-        self.teardown_request_funcs.setdefault(None, []).append(f)
+        self.teardown_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -1639,7 +1641,7 @@ class Flask(_PackageBoundObject):
 
         .. versionadded:: 0.9
         """
-        self.teardown_appcontext_funcs.append(f)
+        self.teardown_appcontext_funcs.append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -2401,6 +2403,19 @@ class Flask(_PackageBoundObject):
             return self.request_context(builder.get_environ())
         finally:
             builder.close()
+
+    def ensure_sync(self, func):
+        """Ensure that the returned function is sync and calls the async func.
+
+        .. versionadded:: 2?
+
+        Override if you wish to change how asynchronous functions are
+        run.
+        """
+        if asyncio.iscoroutinefunction(func):
+            return run_async(func)
+        else:
+            return func
 
     def wsgi_app(self, environ, start_response):
         """The actual WSGI application. This is not implemented in

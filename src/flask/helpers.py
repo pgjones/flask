@@ -8,6 +8,7 @@
     :copyright: 2010 Pallets
     :license: BSD-3-Clause
 """
+import asyncio
 import io
 import mimetypes
 import os
@@ -16,7 +17,8 @@ import posixpath
 import socket
 import sys
 import unicodedata
-from functools import update_wrapper
+from concurrent.futures import Future, ThreadPoolExecutor
+from functools import update_wrapper, wraps
 from threading import RLock
 from time import time
 from zlib import adler32
@@ -34,6 +36,8 @@ from ._compat import fspath
 from ._compat import PY2
 from ._compat import string_types
 from ._compat import text_type
+from .ctx import copy_current_request_context
+from .ctx import has_request_context
 from .globals import _app_ctx_stack
 from .globals import _request_ctx_stack
 from .globals import current_app
@@ -1151,3 +1155,30 @@ def is_ip(value):
             return True
 
     return False
+
+
+def run_async(func):
+    """Ensure that the async function is run on a different thread."""
+
+    @wraps(func)
+    def _wrapper(*args, **kwargs):
+        call_result = Future()
+        def _run():
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(func(*args, **kwargs))
+            except Exception as error:
+                call_result.set_exception(error)
+            else:
+                call_result.set_result(result)
+            finally:
+                loop.close()
+
+        loop_executor = ThreadPoolExecutor(max_workers=1)
+        if has_request_context():
+            _run = copy_current_request_context(_run)
+        loop_future = loop_executor.submit(_run)
+        loop_future.result()
+        return call_result.result()
+
+    return _wrapper
