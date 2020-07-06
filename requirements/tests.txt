@@ -4,6 +4,7 @@
 #
 #    pip-compile requirements/tests.in
 #
+asgiref==3.2.10           # via -r requirements/tests.in
 attrs==20.2.0             # via pytest
 blinker==1.4              # via -r requirements/tests.in
 greenlet==0.4.17          # via -r requirements/tests.in

@@ -1118,7 +1118,7 @@ class Flask(Scaffold):
                     "View function mapping is overwriting an existing"
                     f" endpoint function: {endpoint}"
                 )
-            self.view_functions[endpoint] = view_func
+            self.view_functions[endpoint] = self.ensure_sync(view_func)
 
     @setupmethod
     def template_filter(self, name=None):
@@ -1233,7 +1233,7 @@ class Flask(Scaffold):
 
         .. versionadded:: 0.8
         """
-        self.before_first_request_funcs.append(f)
+        self.before_first_request_funcs.append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -1266,7 +1266,7 @@ class Flask(Scaffold):
 
         .. versionadded:: 0.9
         """
-        self.teardown_appcontext_funcs.append(f)
+        self.teardown_appcontext_funcs.append(self.ensure_sync(f))
         return f
 
     @setupmethod

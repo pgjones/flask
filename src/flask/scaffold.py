@@ -1,9 +1,11 @@
 from functools import update_wrapper
+from inspect import iscoroutinefunction
 
 from werkzeug.exceptions import default_exceptions
 from werkzeug.exceptions import HTTPException
 
 from .helpers import _PackageBoundObject
+from .helpers import run_async
 from .templating import _default_template_ctx_processor
 
 # a singleton sentinel value for parameter defaults
@@ -201,7 +203,7 @@ class Scaffold(_PackageBoundObject):
         """
 
         def decorator(f):
-            self.view_functions[endpoint] = f
+            self.view_functions[endpoint] = self.ensure_sync(f)
             return f
 
         return decorator
@@ -217,7 +219,7 @@ class Scaffold(_PackageBoundObject):
         non-None value, the value is handled as if it was the return value from
         the view, and further request handling is stopped.
         """
-        self.before_request_funcs.setdefault(None, []).append(f)
+        self.before_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -231,7 +233,7 @@ class Scaffold(_PackageBoundObject):
         As of Flask 0.7 this function might not be executed at the end of the
         request in case an unhandled exception occurred.
         """
-        self.after_request_funcs.setdefault(None, []).append(f)
+        self.after_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -270,7 +272,7 @@ class Scaffold(_PackageBoundObject):
            debugger can still access it.  This behavior can be controlled
            by the ``PRESERVE_CONTEXT_ON_EXCEPTION`` configuration variable.
         """
-        self.teardown_request_funcs.setdefault(None, []).append(f)
+        self.teardown_request_funcs.setdefault(None, []).append(self.ensure_sync(f))
         return f
 
     @setupmethod
@@ -376,7 +378,7 @@ class Scaffold(_PackageBoundObject):
             )
 
         handlers = self.error_handler_spec.setdefault(key, {}).setdefault(code, {})
-        handlers[exc_class] = f
+        handlers[exc_class] = self.ensure_sync(f)
 
     @staticmethod
     def _get_exc_class_and_code(exc_class_or_code):
@@ -400,6 +402,19 @@ class Scaffold(_PackageBoundObject):
             return exc_class, exc_class.code
         else:
             return exc_class, None
+
+    def ensure_sync(self, func):
+        """Ensure that the returned function is sync and calls the async func.
+
+        .. versionadded:: 2.0
+
+        Override if you wish to change how asynchronous functions are
+        run.
+        """
+        if iscoroutinefunction(func):
+            return run_async(func)
+        else:
+            return func
 
 
 def _endpoint_from_view_func(view_func):

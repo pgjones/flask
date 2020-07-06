@@ -59,6 +59,8 @@ Unreleased
     conditional requests instead of using a timed cache. :pr:`3828`
 -   ``helpers.safe_join`` is deprecated. Use
     ``werkzeug.utils.safe_join`` instead. :pr:`3828`
+-   Support async views, error handlers, before and after request, and
+    teardown functions. :pr:`3412`
 
 
 Version 1.1.2
