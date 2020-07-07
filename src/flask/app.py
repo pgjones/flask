@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import timedelta
 from functools import update_wrapper
+from io import BytesIO
 from itertools import chain
 from threading import Lock
 
@@ -2371,3 +2372,74 @@ class Flask(_PackageBoundObject):
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name!r}>"
+
+
+class ASGIFlask(Flask):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            raise Exception(f"Scope {scope['type']} not supported")
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            body.extend(message.get("body", b""))
+            if not message.get("more_body"):
+                break
+
+        server = scope.get("server") or ("localhost", 80)
+        environ = {
+            "REQUEST_METHOD": scope["method"],
+            "SCRIPT_NAME": scope.get("root_path", ""),
+            "PATH_INFO": scope["path"],
+            "QUERY_STRING": scope["query_string"].decode("ascii"),
+            "SERVER_NAME": server[0],
+            "SERVER_PORT": server[1],
+            "SERVER_PROTOCOL": "HTTP/%s" % scope["http_version"],
+            "wsgi.version": (1, 0),
+            "wsgi.url_scheme": scope.get("scheme", "http"),
+            "wsgi.input": BytesIO(body),
+            "wsgi.errors": BytesIO(),
+            "wsgi.multithread": True,
+            "wsgi.multiprocess": True,
+            "wsgi.run_once": False,
+        }
+
+        if "client" in scope:
+            environ["REMOTE_ADDR"] = scope["client"][0]
+
+        for name, value in scope.get("headers", []):
+            name = name.decode("latin1")
+            if name == "content-length":
+                corrected_name = "CONTENT_LENGTH"
+            elif name == "content-type":
+                corrected_name = "CONTENT_TYPE"
+            else:
+                corrected_name = "HTTP_%s" % name.upper().replace("-", "_")
+            # HTTPbis say only ASCII chars are allowed in headers, but we latin1 just in case
+            value = value.decode("latin1")
+            if corrected_name in environ:
+                value = environ[corrected_name] + "," + value
+            environ[corrected_name] = value
+
+        status_code = None
+        headers = None
+
+        def _start_response(status, response_headers, exc_info=None):
+            nonlocal status_code
+            nonlocal headers
+            raw, _ = status.split(" ", 1)
+            status_code = int(raw)
+            headers = [
+                (name.lower().encode("ascii"), value.encode("ascii"))
+                for name, value in response_headers
+            ]
+
+        output_iterable = self.wsgi_app(environ, _start_response)
+        await send(
+            {"type": "http.response.start", "status": status_code, "headers": headers}
+        )
+        for output in output_iterable:
+            await send(
+                {"type": "http.response.body", "body": output, "more_body": True}
+            )
+        await send({"type": "http.response.body", "more_body": False})
